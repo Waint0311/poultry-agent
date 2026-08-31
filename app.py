@@ -1,6 +1,6 @@
 """
 兽医康康 - 禽病问诊AI助手
-简约对话式设计 - 修复版
+布局：禽病信息 → 问诊记录 → 快速案例
 """
 
 import streamlit as st
@@ -82,21 +82,6 @@ st.markdown("""
         margin-top: 0;
     }
     
-    /* 输入区域容器 */
-    .input-container {
-        background: white;
-        border: 2px solid #e5e7eb;
-        border-radius: 1rem;
-        padding: 1.5rem;
-        margin: 1rem 0;
-    }
-    
-    .input-container h4 {
-        color: #10b981;
-        margin-top: 0;
-        margin-bottom: 1rem;
-    }
-    
     /* 输入框样式 */
     .stTextInput > div > div > input,
     .stTextArea > div > div > textarea,
@@ -130,20 +115,18 @@ st.markdown("""
         transform: translateY(-1px);
     }
     
-    /* 示例按钮 */
-    .example-button {
-        background: white !important;
-        color: #10b981 !important;
-        border: 2px solid #10b981 !important;
-        font-size: 0.9rem !important;
-        padding: 0.5rem 1rem !important;
-        border-radius: 0.5rem !important;
-        margin: 0.25rem !important;
+    /* 快速案例按钮 */
+    .stButton[key^="example_"] > button {
+        background: white;
+        color: #10b981;
+        border: 2px solid #10b981;
+        font-size: 0.9rem;
+        padding: 0.5rem 1rem;
     }
     
-    .example-button:hover {
-        background: #10b981 !important;
-        color: white !important;
+    .stButton[key^="example_"] > button:hover {
+        background: #10b981;
+        color: white;
     }
     
     /* 底部装饰条 */
@@ -194,8 +177,6 @@ st.markdown("""
 # ==================== 初始化 session_state ====================
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if 'selected_example' not in st.session_state:
-    st.session_state.selected_example = None
 
 # ==================== 头部 ====================
 st.markdown("""
@@ -212,118 +193,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ==================== 问诊记录 ====================
-st.markdown("### 💬 问诊记录")
-
-if st.session_state.chat_history:
-    for msg in st.session_state.chat_history:
-        if msg["type"] == "user":
-            st.markdown(f'<div class="user-message">👤 {msg["content"]}</div>', unsafe_allow_html=True)
-        elif msg["type"] == "emergency":
-            emergency_data = msg["content"]
-            emergency_html = f"""
-            <div class="emergency-message">
-                <h3>🚨 {emergency_data['title']}</h3>
-                <p><strong>{emergency_data['message']}</strong></p>
-                <ol style="margin: 1rem 0; padding-left: 1.5rem;">
-                    {"".join([f'<li style="margin: 0.5rem 0;">{step}</li>' for step in emergency_data['steps']])}
-                </ol>
-            </div>
-            """
-            st.markdown(emergency_html, unsafe_allow_html=True)
-        elif msg["type"] == "assistant":
-            st.markdown(f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>{msg["content"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
-else:
-    st.info("👆 请在下方填写病禽信息开始问诊")
-
-# ==================== 输入表单 ====================
-st.markdown("---")
-st.markdown("### 📝 填写病禽信息")
-
-# 快速案例
-st.markdown("**💡 快速案例（点击自动填入）：**")
-example_cols = st.columns(3)
-
-examples = [
-    ("🐔 鸡血便", "鸡（蛋鸡）", "28天", "200只", "3只", "拉血便，肛门羽毛沾血"),
-    ("🦆 鸭神经症状", "鸭（肉鸭）", "20天", "500只", "10只", "一直摇头，拉绿色稀粪"),
-    ("🦢 鹅腿瘫", "鹅", "3个月", "100只", "0", "腿站不起来，出现瘫痪"),
-]
-
-# 处理快速案例点击
-for i, (title, pt, a, bc, dc, s) in enumerate(examples):
-    with example_cols[i]:
-        if st.button(title, key=f"example_btn_{i}"):
-            # 保存到 session_state
-            st.session_state.selected_example = {
-                "poultry_type": pt,
-                "age": a,
-                "bird_count": bc,
-                "death_count": dc,
-                "symptoms": s
-            }
-            # 清空历史并立即处理
-            st.session_state.chat_history = []
-            poultry_type = pt
-            age = a
-            bird_count = bc
-            death_count = dc
-            symptoms = s
-            
-            # 处理问诊逻辑
-            if death_count and death_count.isdigit() and int(death_count) > 0:
-                st.session_state.chat_history.append({
-                    "type": "user",
-                    "content": f"我家的{poultry_type}出问题了，死亡{death_count}只..."
-                })
-                st.session_state.chat_history.append({
-                    "type": "emergency",
-                    "content": {
-                        "title": "疑似重大动物疫病",
-                        "message": f"检测到群体死亡事件（{death_count}只），请立即采取以下措施：",
-                        "steps": [
-                            "📞 立即拨打 12316 上报当地畜牧兽医站",
-                            "🚫 不要移动病死禽",
-                            "💀 深埋无害化处理",
-                            "🧴 对全场进行严格消毒",
-                            "🔒 禁止销售病死禽及产品"
-                        ]
-                    }
-                })
-            elif symptoms:
-                st.session_state.chat_history.append({
-                    "type": "user",
-                    "content": f"{poultry_type}，{age}，{bird_count}，症状：{symptoms}"
-                })
-                
-                response = f"""根据您描述的情况：
-
-**📋 病禽信息**
-- 品种：{poultry_type}
-- 日龄/阶段：{age}
-- 群体规模：{bird_count}
-
-**🔍 初步分析**
-您描述的症状：{symptoms}
-
-**❓ 为更准确诊断，请确认：**
-1. 粪便形态：水样便 / 糊状便 / 带血便 / 绿色便？
-2. 精神状态：正常 / 精神差 / 不吃不喝？
-3. 鸡冠颜色：正常 / 苍白 / 发紫？
-4. 传播情况：周围其他禽类有同样症状吗？
-
-请回复以上问题，我将为您提供更准确的诊断建议。"""
-
-                st.session_state.chat_history.append({
-                    "type": "assistant",
-                    "content": response
-                })
-            
-            st.session_state.selected_example = None
-            st.rerun()
-
-# 输入表单
-st.markdown("<br>", unsafe_allow_html=True)
+# ==================== 第1部分：禽病信息 ====================
+st.markdown("## 📝 填写病禽信息")
 
 col1, col2 = st.columns([1, 1])
 
@@ -401,6 +272,101 @@ if st.button("🔍 开始问诊", use_container_width=True):
         st.warning("👆 请填写症状信息后开始问诊")
     
     st.rerun()
+
+# ==================== 第2部分：问诊记录 ====================
+st.markdown("---")
+st.markdown("### 💬 问诊记录")
+
+if st.session_state.chat_history:
+    for msg in st.session_state.chat_history:
+        if msg["type"] == "user":
+            st.markdown(f'<div class="user-message">👤 {msg["content"]}</div>', unsafe_allow_html=True)
+        elif msg["type"] == "emergency":
+            emergency_data = msg["content"]
+            emergency_html = f"""
+            <div class="emergency-message">
+                <h3>🚨 {emergency_data['title']}</h3>
+                <p><strong>{emergency_data['message']}</strong></p>
+                <ol style="margin: 1rem 0; padding-left: 1.5rem;">
+                    {"".join([f'<li style="margin: 0.5rem 0;">{step}</li>' for step in emergency_data['steps']])}
+                </ol>
+            </div>
+            """
+            st.markdown(emergency_html, unsafe_allow_html=True)
+        elif msg["type"] == "assistant":
+            st.markdown(f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>{msg["content"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
+else:
+    st.info("👆 请在上方填写病禽信息开始问诊")
+
+# ==================== 第3部分：快速案例 ====================
+st.markdown("---")
+st.markdown("### 💡 快速案例")
+
+st.markdown("点击下方按钮，快速体验问诊流程：")
+
+examples = [
+    ("🐔 鸡血便案例", "鸡（蛋鸡）", "28天", "200只", "3只", "拉血便，肛门羽毛沾血"),
+    ("🦆 鸭神经症状", "鸭（肉鸭）", "20天", "500只", "10只", "一直摇头，拉绿色稀粪"),
+    ("🦢 鹅腿瘫案例", "鹅", "3个月", "100只", "0", "腿站不起来，出现瘫痪"),
+]
+
+cols = st.columns(3)
+for i, (title, pt, a, bc, dc, s) in enumerate(examples):
+    with cols[i]:
+        if st.button(title, key=f"example_{i}"):
+            # 清空历史
+            st.session_state.chat_history = []
+            
+            # 处理问诊逻辑
+            if dc and dc.isdigit() and int(dc) > 0:
+                st.session_state.chat_history.append({
+                    "type": "user",
+                    "content": f"我家的{pt}出问题了，死亡{dc}只..."
+                })
+                st.session_state.chat_history.append({
+                    "type": "emergency",
+                    "content": {
+                        "title": "疑似重大动物疫病",
+                        "message": f"检测到群体死亡事件（{dc}只），请立即采取以下措施：",
+                        "steps": [
+                            "📞 立即拨打 12316 上报当地畜牧兽医站",
+                            "🚫 不要移动病死禽",
+                            "💀 深埋无害化处理",
+                            "🧴 对全场进行严格消毒",
+                            "🔒 禁止销售病死禽及产品"
+                        ]
+                    }
+                })
+            else:
+                st.session_state.chat_history.append({
+                    "type": "user",
+                    "content": f"{pt}，{a}，{bc}，症状：{s}"
+                })
+                
+                response = f"""根据您描述的情况：
+
+**📋 病禽信息**
+- 品种：{pt}
+- 日龄/阶段：{a}
+- 群体规模：{bc}
+
+**🔍 初步分析**
+您描述的症状：{s}
+
+**❓ 为更准确诊断，请确认：**
+1. 粪便形态：水样便 / 糊状便 / 带血便 / 绿色便？
+2. 精神状态：正常 / 精神差 / 不吃不喝？
+3. 鸡冠颜色：正常 / 苍白 / 发紫？
+4. 传播情况：周围其他禽类有同样症状吗？
+
+请回复以上问题，我将为您提供更准确的诊断建议。"""
+
+                st.session_state.chat_history.append({
+                    "type": "assistant",
+                    "content": response
+                })
+            
+            st.rerun()
 
 # ==================== 底部装饰 ====================
 st.markdown('<div class="bottom-bar"></div>', unsafe_allow_html=True)
