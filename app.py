@@ -1,6 +1,6 @@
 """
 兽医康康 - 禽病问诊AI助手
-布局：禽病信息 → 问诊记录（含主要症状+按钮）→ 快速案例
+布局：禽病信息 → 问诊记录 → 主要症状+按钮 → 快速案例
 """
 
 import streamlit as st
@@ -109,14 +109,6 @@ st.markdown("""
     .stTextArea > div > div > textarea:focus {
         border-color: #10b981;
         box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
-    }
-    
-    /* 主要症状标签 */
-    .symptoms-label {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: #374151;
-        margin-bottom: 0.5rem;
     }
     
     /* 按钮样式 */
@@ -230,9 +222,35 @@ with col2:
     bird_count = st.text_input("🐔 群体规模", placeholder="例如：200只、500只")
     death_count = st.text_input("💀 已死亡数量", placeholder="如果没有死亡请留空")
 
-# ==================== 第2部分：问诊记录 + 主要症状 + 按钮 ====================
+# ==================== 第2部分：问诊记录 ====================
 st.markdown("---")
 st.markdown("### 💬 问诊记录")
+
+# 显示问诊记录
+if st.session_state.chat_history:
+    for msg in st.session_state.chat_history:
+        if msg["type"] == "user":
+            st.markdown(f'<div class="user-message">👤 {msg["content"]}</div>', unsafe_allow_html=True)
+        elif msg["type"] == "emergency":
+            emergency_data = msg["content"]
+            emergency_html = f"""
+            <div class="emergency-message">
+                <h3>🚨 {emergency_data['title']}</h3>
+                <p><strong>{emergency_data['message']}</strong></p>
+                <ol style="margin: 1rem 0; padding-left: 1.5rem;">
+                    {"".join([f'<li style="margin: 0.5rem 0;">{step}</li>' for step in emergency_data['steps']])}
+                </ol>
+            </div>
+            """
+            st.markdown(emergency_html, unsafe_allow_html=True)
+        elif msg["type"] == "assistant":
+            st.markdown(f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>{msg["content"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
+else:
+    st.info("👆 请在下方填写主要症状后点击'开始问诊'")
+
+# ==================== 第3部分：主要症状 + 按钮 ====================
+st.markdown("---")
+st.markdown("### 📝 提交问诊")
 
 # 主要症状和按钮（并行）
 col_symptoms, col_button = st.columns([4, 1])
@@ -244,7 +262,7 @@ with col_symptoms:
     )
 
 with col_button:
-    st.markdown("<br>", unsafe_allow_html=True)  # 对齐
+    st.markdown("<br>" * 3, unsafe_allow_html=True)  # 对齐
     if st.button("🔍 开始问诊", use_container_width=True):
         # 检测群体死亡 - 紧急情况
         if death_count and death_count.isdigit() and int(death_count) > 0:
@@ -301,29 +319,7 @@ with col_button:
         
         st.rerun()
 
-# 显示问诊记录
-if st.session_state.chat_history:
-    for msg in st.session_state.chat_history:
-        if msg["type"] == "user":
-            st.markdown(f'<div class="user-message">👤 {msg["content"]}</div>', unsafe_allow_html=True)
-        elif msg["type"] == "emergency":
-            emergency_data = msg["content"]
-            emergency_html = f"""
-            <div class="emergency-message">
-                <h3>🚨 {emergency_data['title']}</h3>
-                <p><strong>{emergency_data['message']}</strong></p>
-                <ol style="margin: 1rem 0; padding-left: 1.5rem;">
-                    {"".join([f'<li style="margin: 0.5rem 0;">{step}</li>' for step in emergency_data['steps']])}
-                </ol>
-            </div>
-            """
-            st.markdown(emergency_html, unsafe_allow_html=True)
-        elif msg["type"] == "assistant":
-            st.markdown(f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>{msg["content"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
-else:
-    st.info("👆 请在上方填写主要症状后点击'开始问诊'")
-
-# ==================== 第3部分：快速案例 ====================
+# ==================== 第4部分：快速案例 ====================
 st.markdown("---")
 st.markdown("### 💡 快速案例")
 
