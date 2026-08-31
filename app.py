@@ -222,7 +222,7 @@ with col2:
     bird_count = st.text_input("🐔 群体规模", placeholder="例如：200只、500只")
     death_count = st.text_input("💀 已死亡数量", placeholder="如果没有死亡请留空")
 
-# ==================== 第2部分：问诊记录 ====================
+# ==================== 第2部分：问诊记录（含对话历史 + 主要症状+按钮） ====================
 st.markdown("---")
 st.markdown("### 💬 问诊记录")
 
@@ -248,11 +248,9 @@ if st.session_state.chat_history:
 else:
     st.info("👆 请在下方填写主要症状后点击'开始问诊'")
 
-# ==================== 第3部分：主要症状 + 按钮 ====================
-st.markdown("---")
-st.markdown("### 📝 提交问诊")
+st.markdown("<br>", unsafe_allow_html=True)
 
-# 主要症状和按钮（并行）
+# 主要症状和按钮（并行）- 放在对话历史下面
 col_symptoms, col_button = st.columns([4, 1])
 
 with col_symptoms:
