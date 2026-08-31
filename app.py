@@ -1,6 +1,6 @@
 """
 兽医康康 - 禽病问诊AI助手
-布局：禽病信息 → 问诊记录 → 快速案例
+布局：禽病信息（主要症状和按钮并行）→ 问诊记录 → 快速案例
 """
 
 import streamlit as st
@@ -84,7 +84,6 @@ st.markdown("""
     
     /* 输入框样式 */
     .stTextInput > div > div > input,
-    .stTextArea > div > div > textarea,
     .stSelectbox > div > div > select {
         border: 2px solid #e5e7eb;
         border-radius: 0.5rem;
@@ -93,9 +92,31 @@ st.markdown("""
     }
     
     .stTextInput > div > div > input:focus,
+    .stSelectbox > div > div > select:focus {
+        border-color: #10b981;
+        box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
+    }
+    
+    /* 主要症状文本框 */
+    .stTextArea > div > div > textarea {
+        border: 2px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.8rem;
+        font-size: 0.95rem;
+        height: 120px;
+    }
+    
     .stTextArea > div > div > textarea:focus {
         border-color: #10b981;
         box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
+    }
+    
+    /* 主要症状标签 */
+    .symptoms-label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 0.5rem;
     }
     
     /* 按钮样式 */
@@ -108,11 +129,12 @@ st.markdown("""
         font-size: 1rem;
         font-weight: 600;
         transition: all 0.2s;
+        height: 100%;
+        min-height: 120px;
     }
     
     .stButton > button:hover {
         background: #059669;
-        transform: translateY(-1px);
     }
     
     /* 快速案例按钮 */
@@ -196,6 +218,7 @@ st.markdown("""
 # ==================== 第1部分：禽病信息 ====================
 st.markdown("## 📝 填写病禽信息")
 
+# 第一行：基本信息
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -204,49 +227,52 @@ with col1:
         ["鸡（蛋鸡）", "鸡（肉鸡）", "鸡（土鸡/种鸡）", "鸭（蛋鸭）", "鸭（肉鸭/番鸭）", "鹅", "鸽/鹌鹑"]
     )
     age = st.text_input("📅 日龄/阶段", placeholder="例如：30天、2个月、产蛋期")
-    bird_count = st.text_input("🐔 群体规模", placeholder="例如：200只、500只")
 
 with col2:
-    symptoms = st.text_area(
-        "🔍 主要症状",
-        placeholder="请描述症状，例如：拉血便、精神不好、不吃料等",
-        height=120
-    )
+    bird_count = st.text_input("🐔 群体规模", placeholder="例如：200只、500只")
     death_count = st.text_input("💀 已死亡数量", placeholder="如果没有死亡请留空")
 
-st.markdown("<br>", unsafe_allow_html=True)
+# 第二行：主要症状 和 开始问诊按钮（并行）
+col_symptoms, col_button = st.columns([4, 1])
 
-# 开始问诊按钮
-if st.button("🔍 开始问诊", use_container_width=True):
-    # 检测群体死亡 - 紧急情况
-    if death_count and death_count.isdigit() and int(death_count) > 0:
-        st.session_state.chat_history.append({
-            "type": "user",
-            "content": f"我家的{poultry_type}出问题了，死亡{death_count}只..."
-        })
-        st.session_state.chat_history.append({
-            "type": "emergency",
-            "content": {
-                "title": "疑似重大动物疫病",
-                "message": f"检测到群体死亡事件（{death_count}只），请立即采取以下措施：",
-                "steps": [
-                    "📞 立即拨打 12316 上报当地畜牧兽医站",
-                    "🚫 不要移动病死禽",
-                    "💀 深埋无害化处理",
-                    "🧴 对全场进行严格消毒",
-                    "🔒 禁止销售病死禽及产品"
-                ]
-            }
-        })
-    
-    # 正常问诊
-    elif symptoms:
-        st.session_state.chat_history.append({
-            "type": "user",
-            "content": f"{poultry_type}，{age if age else '日龄不详'}，{bird_count if bird_count else '规模不详'}，症状：{symptoms}"
-        })
+with col_symptoms:
+    symptoms = st.text_area(
+        "🔍 主要症状",
+        placeholder="请描述症状，例如：拉血便、精神不好、不吃料等"
+    )
+
+with col_button:
+    st.markdown("<br>", unsafe_allow_html=True)  # 对齐
+    if st.button("🔍<br>开始问诊", use_container_width=True):
+        # 检测群体死亡 - 紧急情况
+        if death_count and death_count.isdigit() and int(death_count) > 0:
+            st.session_state.chat_history.append({
+                "type": "user",
+                "content": f"我家的{poultry_type}出问题了，死亡{death_count}只..."
+            })
+            st.session_state.chat_history.append({
+                "type": "emergency",
+                "content": {
+                    "title": "疑似重大动物疫病",
+                    "message": f"检测到群体死亡事件（{death_count}只），请立即采取以下措施：",
+                    "steps": [
+                        "📞 立即拨打 12316 上报当地畜牧兽医站",
+                        "🚫 不要移动病死禽",
+                        "💀 深埋无害化处理",
+                        "🧴 对全场进行严格消毒",
+                        "🔒 禁止销售病死禽及产品"
+                    ]
+                }
+            })
         
-        response = f"""根据您描述的情况：
+        # 正常问诊
+        elif symptoms:
+            st.session_state.chat_history.append({
+                "type": "user",
+                "content": f"{poultry_type}，{age if age else '日龄不详'}，{bird_count if bird_count else '规模不详'}，症状：{symptoms}"
+            })
+            
+            response = f"""根据您描述的情况：
 
 **📋 病禽信息**
 - 品种：{poultry_type}
@@ -264,14 +290,14 @@ if st.button("🔍 开始问诊", use_container_width=True):
 
 请回复以上问题，我将为您提供更准确的诊断建议。"""
 
-        st.session_state.chat_history.append({
-            "type": "assistant",
-            "content": response
-        })
-    else:
-        st.warning("👆 请填写症状信息后开始问诊")
-    
-    st.rerun()
+            st.session_state.chat_history.append({
+                "type": "assistant",
+                "content": response
+            })
+        else:
+            st.warning("👆 请填写症状信息后开始问诊")
+        
+        st.rerun()
 
 # ==================== 第2部分：问诊记录 ====================
 st.markdown("---")
