@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 ima 知识库检索客户端
-通过 ima Agent 接口（OpenAPI）检索《禽病》知识库
+通过 ima 官方 OpenAPI 检索《禽病》知识库
 
 凭证来源：https://ima.qq.com/agent-interface 生成
   - X-Client-Id
   - X-Api-Key
 
-⚠️ 说明：ima OpenAPI 的精确请求格式以官方文档为准。
-如果接口调用失败或未配置凭证，search() 返回 None，
-上层应用会自动降级为"无知识库检索"的纯模型回答。
+接口文档：POST https://ima.qq.com/openapi/wiki/v1/*
+认证 Header：ima-openapi-clientid / ima-openapi-apikey
+响应格式：{ "retcode": 0, "errmsg": "成功", "data": {...} }
 """
 
 import os
@@ -17,46 +17,77 @@ import requests
 
 IMA_CLIENT_ID = os.getenv("IMA_CLIENT_ID", "")
 IMA_API_KEY = os.getenv("IMA_API_KEY", "")
-IMA_API_BASE = os.getenv("IMA_API_BASE", "https://api.ima.qq.com")  # 以官方文档为准
+IMA_API_BASE = os.getenv("IMA_API_BASE", "https://ima.qq.com/openapi/wiki/v1")
+IMA_KB_NAME = os.getenv("IMA_KB_NAME", "禽病")  # 目标知识库名称关键词（默认《禽病》）
 
 
 class ImaClient:
-    """ima 知识库检索客户端（轻量封装）"""
+    """ima 知识库检索客户端"""
 
-    def __init__(self, client_id: str = None, api_key: str = None, api_base: str = None):
+    def __init__(self, client_id: str = None, api_key: str = None, kb_name: str = None):
         self.client_id = client_id or IMA_CLIENT_ID
         self.api_key = api_key or IMA_API_KEY
-        self.api_base = api_base or IMA_API_BASE
+        self.kb_name = kb_name or IMA_KB_NAME
+        self._kb_id = None  # 缓存知识库 ID
 
     def available(self) -> bool:
-        """是否配置了凭证"""
         return bool(self.client_id and self.api_key)
 
-    def list_knowledge_bases(self):
-        """获取知识库列表"""
-        if not self.available():
-            return None
-        # TODO: 按 ima 官方 OpenAPI 文档实现
-        # 示例请求（占位）：
-        # url = f"{self.api_base}/v1/knowledge-bases"
-        # headers = {"X-Client-Id": self.client_id, "X-Api-Key": self.api_key}
-        # return requests.get(url, headers=headers, timeout=10).json()
-        return None
+    def _headers(self) -> dict:
+        return {
+            "ima-openapi-clientid": self.client_id,
+            "ima-openapi-apikey": self.api_key,
+            "Content-Type": "application/json",
+        }
+
+    def _post(self, endpoint: str, payload: dict) -> dict:
+        """POST 请求并解析统一响应结构（code=0 成功）"""
+        resp = requests.post(
+            f"{IMA_API_BASE}/{endpoint}",
+            json=payload,
+            headers=self._headers(),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"ima API 错误: {data.get('msg')}")
+        return data.get("data", {})
+
+    def find_knowledge_base(self, name: str = None) -> str:
+        """按名称搜索知识库，返回第一个匹配的知识库 ID"""
+        query = name or self.kb_name
+        data = self._post("search_knowledge_base", {"query": query, "cursor": "", "limit": 10})
+        for kb in data.get("info_list", []):
+            if query.lower() in kb.get("kb_name", "").lower():
+                return kb.get("kb_id")
+        lst = data.get("info_list", [])
+        return lst[0]["kb_id"] if lst else None
 
     def search(self, query: str, top_k: int = 3):
-        """检索知识库，返回命中的文本片段列表；失败返回 None"""
+        """在《禽病》知识库中检索，返回命中片段列表；失败返回 None"""
         if not self.available():
             return None
         try:
-            # TODO: 按 ima 官方 OpenAPI 文档实现检索端点
-            # url = f"{self.api_base}/v1/search"
-            # payload = {"query": query, "top_k": top_k}
-            # headers = {"X-Client-Id": self.client_id, "X-Api-Key": self.api_key, "Content-Type": "application/json"}
-            # resp = requests.post(url, json=payload, headers=headers, timeout=15)
-            # resp.raise_for_status()
-            # data = resp.json()
-            # return [item.get("text", "") for item in data.get("hits", [])]
-            return None  # 未实现前返回 None，上层降级
+            if not self._kb_id:
+                self._kb_id = self.find_knowledge_base()
+            if not self._kb_id:
+                return None
+
+            data = self._post("search_knowledge", {
+                "query": query,
+                "cursor": "",
+                "knowledge_base_id": self._kb_id,
+            })
+
+            results = []
+            for hit in data.get("info_list", [])[:top_k]:
+                title = hit.get("title", "").strip()
+                content = hit.get("highlight_content", "").strip()
+                if not title:
+                    continue
+                results.append(f"《{title}》" + (f"：{content}" if content else ""))
+            return results if results else None
         except Exception:
             return None
 
@@ -67,4 +98,43 @@ def search_ima(query: str, top_k: int = 3):
     hits = client.search(query, top_k=top_k)
     if not hits:
         return None
-    return "\n".join(hits)
+    return "\n\n".join(hits)
+
+
+# 常见禽病关键词（用于多词轮询检索，提高命中率）
+DISEASE_KEYWORDS = [
+    "球虫", "新城疫", "禽流感", "鸡白痢", "沙门氏菌", "大肠杆菌",
+    "传支", "传染性支气管炎", "法氏囊", "马立克", "支原体", "呼吸道",
+    "鸭瘟", "鹅瘟", "小鹅瘟", "鸭病毒性肝炎", "产蛋下降", "寄生虫",
+]
+
+
+def search_ima_multi(query: str, top_k: int = 3):
+    """多词检索：先用完整 query，再尝试疾病关键词，合并去重"""
+    client = ImaClient()
+    results = []
+    seen = set()
+
+    def _collect(hits):
+        if not hits:
+            return
+        for h in hits:
+            if h not in seen:
+                seen.add(h)
+                results.append(h)
+
+    _collect(client.search(query, top_k=top_k))
+
+    # 从 query 中匹配已知疾病关键词，逐个补充检索
+    for kw in DISEASE_KEYWORDS:
+        if len(results) >= top_k + 2:
+            break
+        if kw in query:
+            _collect(client.search(kw, top_k=2))
+
+    # 兜底：ima 按文档标题索引，宽泛词保证至少拿到真实文档池
+    if len(results) < 2:
+        _collect(client.search("禽病", top_k=3))
+        _collect(client.search("鸡病", top_k=3))
+
+    return "\n\n".join(results[:top_k + 2]) if results else None

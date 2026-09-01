@@ -9,7 +9,7 @@ import requests
 import streamlit as st
 
 from system_prompt import SYSTEM_PROMPT_V3
-from ima_client import search_ima
+from ima_client import search_ima_multi
 
 # ==================== 配置（环境变量） ====================
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -61,11 +61,15 @@ def chat_with_ollama(user_text: str, history: list) -> str:
 
 
 def build_consultation(user_text: str) -> str:
-    """组装问诊文本：先检索 ima 知识库，把命中内容作为上下文"""
-    kb_hits = search_ima(user_text)
+    """组装问诊文本：先检索 ima 知识库，把命中文档作为上下文"""
+    # 用"主要症状"部分作为检索词（命中率更高）
+    query = user_text
+    if "【主要症状】" in user_text:
+        query = user_text.split("【主要症状】")[-1].strip()
+    kb_hits = search_ima_multi(query)
     if kb_hits:
         return (
-            "【知识库检索结果，请优先参考并在回答中标注出处】\n"
+            "【知识库检索结果（以下文档来自 ima《禽病》知识库，请在回答中优先参考并标注出处）】\n"
             f"{kb_hits}\n\n"
             f"【用户问诊】\n{user_text}"
         )
