@@ -1,9 +1,76 @@
 """
 兽医康康 - 禽病问诊AI助手
-布局：禽病信息 → 问诊记录 → 主要症状+按钮 → 快速案例
+Web 应用版：Streamlit + Ollama 本地模型 + ima 知识库
+部署：Ubuntu 服务器（模型同机调用 localhost）
 """
 
+import os
+import requests
 import streamlit as st
+
+from system_prompt import SYSTEM_PROMPT_V3
+from ima_client import search_ima
+
+# ==================== 配置（环境变量） ====================
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
+# 可选：用外部文件覆盖系统提示词（放 system_prompt.txt 即可，方便迭代 v4）
+SYSTEM_PROMPT = SYSTEM_PROMPT_V3
+if os.path.exists("system_prompt.txt"):
+    with open("system_prompt.txt", "r", encoding="utf-8") as f:
+        SYSTEM_PROMPT = f.read()
+
+# ==================== Ollama 调用 ====================
+# 局域网直连，禁用系统代理（Mac 代理软件会拦截局域网请求）
+NO_PROXY = {"http": None, "https": None}
+
+
+def ollama_available() -> bool:
+    """检测 Ollama 服务是否可达"""
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3, proxies=NO_PROXY)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def chat_with_ollama(user_text: str, history: list) -> str:
+    """调用 Ollama 生成回答（带系统提示词 + 最近对话历史）"""
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # 保留最近 8 条对话（4 轮），避免超出上下文
+    for msg in history[-8:]:
+        if msg.get("role") in ("user", "assistant"):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_text})
+
+    resp = requests.post(
+        f"{OLLAMA_URL}/api/chat",
+        json={
+            "model": OLLAMA_MODEL,
+            "messages": messages,
+            "stream": False,
+            "think": False,  # 关闭思考模式（qwen3.5 默认思考，会超长超时）
+            "options": {"temperature": TEMPERATURE, "num_ctx": 8192},
+        },
+        timeout=600,
+        proxies=NO_PROXY,
+    )
+    resp.raise_for_status()
+    return resp.json()["message"]["content"]
+
+
+def build_consultation(user_text: str) -> str:
+    """组装问诊文本：先检索 ima 知识库，把命中内容作为上下文"""
+    kb_hits = search_ima(user_text)
+    if kb_hits:
+        return (
+            "【知识库检索结果，请优先参考并在回答中标注出处】\n"
+            f"{kb_hits}\n\n"
+            f"【用户问诊】\n{user_text}"
+        )
+    return user_text
+
 
 # ==================== 页面配置 ====================
 st.set_page_config(
@@ -16,169 +83,80 @@ st.set_page_config(
 # ==================== 自定义样式 ====================
 st.markdown("""
 <style>
-    /* 重置默认样式 */
-    .stApp {
-        background: white;
-    }
-    
-    /* 头部标题 */
-    .header {
-        text-align: center;
-        padding: 1.5rem 0;
-        border-bottom: 1px solid #e5e7eb;
-        margin-bottom: 1rem;
-    }
-    
-    .header h1 {
-        font-size: 2rem;
-        color: #1f2937;
-        margin: 0;
-        font-weight: 700;
-    }
-    
-    .header p {
-        color: #6b7280;
-        font-size: 1rem;
-        margin: 0.5rem 0 0 0;
-    }
-    
-    /* 对话气泡 - 用户 */
+    .stApp { background: white; }
+
+    .header { text-align: center; padding: 1.5rem 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem; }
+    .header h1 { font-size: 2rem; color: #1f2937; margin: 0; font-weight: 700; }
+    .header p { color: #6b7280; font-size: 1rem; margin: 0.5rem 0 0 0; }
+
     .user-message {
-        background: #10b981;
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 1rem 1rem 0.25rem 1rem;
-        margin: 1rem 0;
-        max-width: 80%;
-        margin-left: auto;
-        font-size: 1rem;
-        line-height: 1.6;
+        background: #10b981; color: white; padding: 1rem 1.5rem;
+        border-radius: 1rem 1rem 0.25rem 1rem; margin: 1rem 0;
+        max-width: 80%; margin-left: auto; font-size: 1rem; line-height: 1.6;
     }
-    
-    /* 对话气泡 - 助手 */
     .assistant-message {
-        background: #f3f4f6;
-        color: #1f2937;
-        padding: 1rem 1.5rem;
-        border-radius: 1rem 1rem 1rem 0.25rem;
-        margin: 1rem 0;
-        max-width: 80%;
-        font-size: 1rem;
-        line-height: 1.6;
+        background: #f3f4f6; color: #1f2937; padding: 1rem 1.5rem;
+        border-radius: 1rem 1rem 1rem 0.25rem; margin: 1rem 0;
+        max-width: 80%; font-size: 1rem; line-height: 1.6;
     }
-    
-    /* 紧急提示 */
     .emergency-message {
-        background: #fef2f2;
-        border: 2px solid #ef4444;
-        color: #991b1b;
-        padding: 1.5rem;
-        border-radius: 1rem;
-        margin: 1rem 0;
+        background: #fef2f2; border: 2px solid #ef4444; color: #991b1b;
+        padding: 1.5rem; border-radius: 1rem; margin: 1rem 0;
     }
-    
-    .emergency-message h3 {
-        color: #dc2626;
-        margin-top: 0;
-    }
-    
-    /* 输入框样式 */
+    .emergency-message h3 { color: #dc2626; margin-top: 0; }
+
     .stTextInput > div > div > input,
     .stSelectbox > div > div > select {
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        padding: 0.6rem 0.8rem;
-        font-size: 0.95rem;
+        border: 2px solid #e5e7eb; border-radius: 0.5rem;
+        padding: 0.6rem 0.8rem; font-size: 0.95rem;
     }
-    
     .stTextInput > div > div > input:focus,
     .stSelectbox > div > div > select:focus {
-        border-color: #10b981;
-        box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
+        border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
     }
-    
-    /* 主要症状文本框 */
     .stTextArea > div > div > textarea {
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        padding: 0.6rem 0.8rem;
-        font-size: 0.95rem;
-        height: 120px;
+        border: 2px solid #e5e7eb; border-radius: 0.5rem;
+        padding: 0.6rem 0.8rem; font-size: 0.95rem; height: 120px;
     }
-    
     .stTextArea > div > div > textarea:focus {
-        border-color: #10b981;
-        box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
+        border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
     }
-    
-    /* 按钮样式 */
+
     .stButton > button {
-        background: #10b981;
-        color: white;
-        border: none;
-        border-radius: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        font-size: 1rem;
-        font-weight: 600;
-        transition: all 0.2s;
+        background: #10b981; color: white; border: none; border-radius: 0.5rem;
+        padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600; transition: all 0.2s;
     }
-    
-    .stButton > button:hover {
-        background: #059669;
-    }
-    
-    /* 快速案例按钮 */
+    .stButton > button:hover { background: #059669; }
+
     .stButton[key^="example_"] > button {
-        background: white;
-        color: #10b981;
-        border: 2px solid #10b981;
-        font-size: 0.9rem;
-        padding: 0.5rem 1rem;
+        background: white; color: #10b981; border: 2px solid #10b981;
+        font-size: 0.9rem; padding: 0.5rem 1rem;
     }
-    
-    .stButton[key^="example_"] > button:hover {
-        background: #10b981;
-        color: white;
-    }
-    
-    /* 底部装饰条 */
+    .stButton[key^="example_"] > button:hover { background: #10b981; color: white; }
+
     .bottom-bar {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
+        position: fixed; bottom: 0; left: 0; right: 0; height: 4px;
         background: linear-gradient(90deg, #10b981, #34d399, #10b981);
-        background-size: 200% 100%;
-        animation: gradient-flow 3s ease infinite;
+        background-size: 200% 100%; animation: gradient-flow 3s ease infinite;
     }
-    
     @keyframes gradient-flow {
         0% { background-position: 0% 50%; }
         50% { background-position: 100% 50%; }
         100% { background-position: 0% 50%; }
     }
-    
-    /* 免责声明 */
+
     .disclaimer {
-        background: #fef3c7;
-        border-left: 4px solid #f59e0b;
-        padding: 0.75rem 1rem;
-        margin: 0.5rem 0;
-        border-radius: 0 0.5rem 0.5rem 0;
-        font-size: 0.9rem;
+        background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem 1rem;
+        margin: 0.5rem 0; border-radius: 0 0.5rem 0.5rem 0; font-size: 0.9rem;
     }
-    
-    /* 间距 */
-    .element-container {
-        margin: 0.5rem 0;
+    .model-status {
+        text-align: center; color: #9ca3af; font-size: 0.8rem; padding: 0.5rem;
     }
-    
-    /* 隐藏 Streamlit 默认元素 */
+
+    .element-container { margin: 0.5rem 0; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* 响应式 */
+
     @media (max-width: 768px) {
         .header h1 { font-size: 1.5rem; }
         .user-message, .assistant-message { max-width: 95%; }
@@ -187,8 +165,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==================== 初始化 session_state ====================
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []  # [{role, content}]
 
 # ==================== 头部 ====================
 st.markdown("""
@@ -198,7 +176,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 免责声明
 st.markdown("""
 <div class="disclaimer">
     ⚠️ <strong>免责声明：</strong>本AI仅供参考，不能替代执业兽医现场诊断。紧急情况请立即拨打<strong>12316</strong>。
@@ -208,7 +185,6 @@ st.markdown("""
 # ==================== 第1部分：禽病信息 ====================
 st.markdown("## 📝 填写病禽信息")
 
-# 第一行：基本信息
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -222,35 +198,29 @@ with col2:
     bird_count = st.text_input("🐔 群体规模", placeholder="例如：200只、500只")
     death_count = st.text_input("💀 已死亡数量", placeholder="如果没有死亡请留空")
 
-# ==================== 第2部分：问诊记录（含对话历史 + 主要症状+按钮） ====================
+# ==================== 第2部分：问诊记录 ====================
 st.markdown("---")
 st.markdown("### 💬 问诊记录")
 
 # 显示问诊记录
 if st.session_state.chat_history:
     for msg in st.session_state.chat_history:
-        if msg["type"] == "user":
+        if msg["role"] == "user":
             st.markdown(f'<div class="user-message">👤 {msg["content"]}</div>', unsafe_allow_html=True)
-        elif msg["type"] == "emergency":
-            emergency_data = msg["content"]
-            emergency_html = f"""
-            <div class="emergency-message">
-                <h3>🚨 {emergency_data['title']}</h3>
-                <p><strong>{emergency_data['message']}</strong></p>
-                <ol style="margin: 1rem 0; padding-left: 1.5rem;">
-                    {"".join([f'<li style="margin: 0.5rem 0;">{step}</li>' for step in emergency_data['steps']])}
-                </ol>
-            </div>
-            """
-            st.markdown(emergency_html, unsafe_allow_html=True)
-        elif msg["type"] == "assistant":
-            st.markdown(f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>{msg["content"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
+        elif msg["role"] == "emergency":
+            st.markdown(f'<div class="emergency-message">{msg["content"]}</div>', unsafe_allow_html=True)
+        elif msg["role"] == "assistant":
+            st.markdown(
+                f'<div class="assistant-message">🤖 <strong>兽医康康：</strong><br><br>'
+                f'{msg["content"].replace(chr(10), "<br>")}</div>',
+                unsafe_allow_html=True
+            )
 else:
     st.info("👆 请在下方填写主要症状后点击'开始问诊'")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# 主要症状和按钮（并行）- 放在对话历史下面
+# ==================== 主要症状 + 按钮（并行） ====================
 col_symptoms, col_button = st.columns([4, 1])
 
 with col_symptoms:
@@ -260,71 +230,60 @@ with col_symptoms:
     )
 
 with col_button:
-    st.markdown("<br>" * 3, unsafe_allow_html=True)  # 对齐
-    if st.button("🔍 开始问诊", use_container_width=True):
-        # 检测群体死亡 - 紧急情况
-        if death_count and death_count.isdigit() and int(death_count) > 0:
-            st.session_state.chat_history.append({
-                "type": "user",
-                "content": f"我家的{poultry_type}出问题了，死亡{death_count}只..."
-            })
-            st.session_state.chat_history.append({
-                "type": "emergency",
-                "content": {
-                    "title": "疑似重大动物疫病",
-                    "message": f"检测到群体死亡事件（{death_count}只），请立即采取以下措施：",
-                    "steps": [
-                        "📞 立即拨打 12316 上报当地畜牧兽医站",
-                        "🚫 不要移动病死禽",
-                        "💀 深埋无害化处理",
-                        "🧴 对全场进行严格消毒",
-                        "🔒 禁止销售病死禽及产品"
-                    ]
-                }
-            })
-        
-        # 正常问诊
-        elif symptoms:
-            st.session_state.chat_history.append({
-                "type": "user",
-                "content": f"{poultry_type}，{age if age else '日龄不详'}，{bird_count if bird_count else '规模不详'}，症状：{symptoms}"
-            })
-            
-            response = f"""根据您描述的情况：
+    st.markdown("<br>" * 3, unsafe_allow_html=True)
+    submitted = st.button("🔍 开始问诊", use_container_width=True)
 
-**📋 病禽信息**
-- 品种：{poultry_type}
-- 日龄/阶段：{age if age else '未提供'}
-- 群体规模：{bird_count if bird_count else '未提供'}
-
-**🔍 初步分析**
-您描述的症状：{symptoms}
-
-**❓ 为更准确诊断，请确认：**
-1. 粪便形态：水样便 / 糊状便 / 带血便 / 绿色便？
-2. 精神状态：正常 / 精神差 / 不吃不喝？
-3. 鸡冠颜色：正常 / 苍白 / 发紫？
-4. 传播情况：周围其他禽类有同样症状吗？
-
-请回复以上问题，我将为您提供更准确的诊断建议。"""
-
-            st.session_state.chat_history.append({
-                "type": "assistant",
-                "content": response
-            })
-        else:
-            st.warning("👆 请填写症状信息后开始问诊")
-        
+# ==================== 处理问诊 ====================
+if submitted:
+    # ---- 紧急规则（最高优先级，不依赖模型）----
+    if death_count and death_count.isdigit() and int(death_count) > 0:
+        emergency_html = (
+            "<h3>🚨 紧急提示 - 疑似重大动物疫病</h3>"
+            f"<p><strong>检测到群体死亡事件（{death_count}只），请立即采取以下措施：</strong></p>"
+            "<ol style='margin:1rem 0; padding-left:1.5rem;'>"
+            "<li>📞 立即拨打 <strong>12316</strong> 上报当地畜牧兽医站</li>"
+            "<li>🚫 不要移动病死禽</li>"
+            "<li>💀 深埋无害化处理</li>"
+            "<li>🧴 对全场进行严格消毒</li>"
+            "<li>🔒 禁止销售病死禽及产品</li>"
+            "</ol>"
+        )
+        st.session_state.chat_history.append({"role": "user", "content": f"我家的{poultry_type}出问题了，死亡{death_count}只..."})
+        st.session_state.chat_history.append({"role": "emergency", "content": emergency_html})
         st.rerun()
 
-# ==================== 第4部分：快速案例 ====================
+    elif symptoms:
+        # 组装用户文本（含表单信息）
+        user_text = (
+            f"【病禽信息】品种：{poultry_type}；日龄/阶段：{age if age else '未提供'}；"
+            f"群体规模：{bird_count if bird_count else '未提供'}；已死亡：{death_count if death_count else '0'}只。\n"
+            f"【主要症状】{symptoms}"
+        )
+        st.session_state.chat_history.append({"role": "user", "content": user_text})
+
+        with st.spinner("🔍 兽医康康正在检索知识库并分析..."):
+            try:
+                if not ollama_available():
+                    raise RuntimeError(f"无法连接模型服务（{OLLAMA_URL}），请检查 Ollama 是否运行")
+                prompt = build_consultation(user_text)
+                answer = chat_with_ollama(prompt, st.session_state.chat_history)
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
+            except Exception as e:
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": f"⚠️ 模型服务暂时不可用：{e}\n\n请确认 Ubuntu 上的 Ollama 已启动（`ollama serve`），且本应用配置的 OLLAMA_URL 正确。"
+                })
+        st.rerun()
+    else:
+        st.warning("👆 请填写症状信息后开始问诊")
+
+# ==================== 第3部分：快速案例 ====================
 st.markdown("---")
 st.markdown("### 💡 快速案例")
-
 st.markdown("点击下方按钮，快速体验问诊流程：")
 
 examples = [
-    ("🐔 鸡血便案例", "鸡（蛋鸡）", "28天", "200只", "3只", "拉血便，肛门羽毛沾血"),
+    ("🐔 鸡血便案例", "鸡（蛋鸡）", "28天", "200只", "3只", "拉血便，肛门羽毛沾血，采食量下降"),
     ("🦆 鸭神经症状", "鸭（肉鸭）", "20天", "500只", "10只", "一直摇头，拉绿色稀粪"),
     ("🦢 鹅腿瘫案例", "鹅", "3个月", "100只", "0", "腿站不起来，出现瘫痪"),
 ]
@@ -333,59 +292,25 @@ cols = st.columns(3)
 for i, (title, pt, a, bc, dc, s) in enumerate(examples):
     with cols[i]:
         if st.button(title, key=f"example_{i}"):
-            # 清空历史
-            st.session_state.chat_history = []
-            
-            # 处理问诊逻辑
-            if dc and dc.isdigit() and int(dc) > 0:
-                st.session_state.chat_history.append({
-                    "type": "user",
-                    "content": f"我家的{pt}出问题了，死亡{dc}只..."
-                })
-                st.session_state.chat_history.append({
-                    "type": "emergency",
-                    "content": {
-                        "title": "疑似重大动物疫病",
-                        "message": f"检测到群体死亡事件（{dc}只），请立即采取以下措施：",
-                        "steps": [
-                            "📞 立即拨打 12316 上报当地畜牧兽医站",
-                            "🚫 不要移动病死禽",
-                            "💀 深埋无害化处理",
-                            "🧴 对全场进行严格消毒",
-                            "🔒 禁止销售病死禽及产品"
-                        ]
-                    }
-                })
-            else:
-                st.session_state.chat_history.append({
-                    "type": "user",
-                    "content": f"{pt}，{a}，{bc}，症状：{s}"
-                })
-                
-                response = f"""根据您描述的情况：
-
-**📋 病禽信息**
-- 品种：{pt}
-- 日龄/阶段：{a}
-- 群体规模：{bc}
-
-**🔍 初步分析**
-您描述的症状：{s}
-
-**❓ 为更准确诊断，请确认：**
-1. 粪便形态：水样便 / 糊状便 / 带血便 / 绿色便？
-2. 精神状态：正常 / 精神差 / 不吃不喝？
-3. 鸡冠颜色：正常 / 苍白 / 发紫？
-4. 传播情况：周围其他禽类有同样症状吗？
-
-请回复以上问题，我将为您提供更准确的诊断建议。"""
-
-                st.session_state.chat_history.append({
-                    "type": "assistant",
-                    "content": response
-                })
-            
+            user_text = f"【病禽信息】品种：{pt}；日龄/阶段：{a}；群体规模：{bc}；已死亡：{dc}只。\n【主要症状】{s}"
+            st.session_state.chat_history.append({"role": "user", "content": user_text})
+            with st.spinner("🔍 兽医康康正在检索知识库并分析..."):
+                try:
+                    if not ollama_available():
+                        raise RuntimeError(f"无法连接模型服务（{OLLAMA_URL}），请检查 Ollama 是否运行")
+                    prompt = build_consultation(user_text)
+                    answer = chat_with_ollama(prompt, st.session_state.chat_history)
+                    st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": f"⚠️ 模型服务暂时不可用：{e}"
+                    })
             st.rerun()
 
-# ==================== 底部装饰 ====================
+# ==================== 底部 ====================
 st.markdown('<div class="bottom-bar"></div>', unsafe_allow_html=True)
+
+_ok = ollama_available()
+_status = f"模型：{OLLAMA_MODEL} @ {OLLAMA_URL}" if _ok else f"⚠️ 模型服务未连接（{OLLAMA_URL}）"
+st.markdown(f'<div class="model-status">{_status}</div>', unsafe_allow_html=True)
