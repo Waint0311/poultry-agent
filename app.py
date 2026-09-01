@@ -15,6 +15,7 @@ from ima_client import search_ima_multi
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
+APP_PASSWORD = os.getenv("APP_PASSWORD", "")  # 测评访问密码（留空则不限制）
 # 可选：用外部文件覆盖系统提示词（放 system_prompt.txt 即可，方便迭代 v4）
 SYSTEM_PROMPT = SYSTEM_PROMPT_V3
 if os.path.exists("system_prompt.txt"):
@@ -171,6 +172,22 @@ st.markdown("""
 # ==================== 初始化 session_state ====================
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  # [{role, content}]
+
+# ==================== 访问密码（测评保护） ====================
+if APP_PASSWORD:
+    if "auth_ok" not in st.session_state:
+        st.session_state.auth_ok = False
+    if not st.session_state.auth_ok:
+        st.markdown("## 🔑 兽医康康 · 访问验证")
+        st.markdown("请输入访问密码（测评期保护，请联系管理员获取）")
+        pwd = st.text_input("密码", type="password")
+        if st.button("进入系统", use_container_width=True):
+            if pwd == APP_PASSWORD:
+                st.session_state.auth_ok = True
+                st.rerun()
+            else:
+                st.error("❌ 密码错误，请重试")
+        st.stop()
 
 # ==================== 头部 ====================
 st.markdown("""
